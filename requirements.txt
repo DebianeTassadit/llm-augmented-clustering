@@ -1,0 +1,14 @@
+numpy
+scikit-learn
+langchain-core
+langchain-openai
+few-shot-clustering
+active-semi-supervised-clustering # For pairwise constraints method
+python-dotenv # Optional, for loading .env file
+datasets
+sentence-transformers>=2.2.0
+gensim>=4.3.0
+tiktoken
+# Dev tools
+black
+ruff
