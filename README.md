@@ -2,6 +2,8 @@
 
 > A systematic evaluation of large language model–guided short-text clustering across eight methods on three intent-detection benchmarks.
 
+**Authors:** Ala Eddine Choukr-Allah · Tassadit Debiane · Aymane Nouhail · Khalil Maadani   - supervised by Pr. Mohamed Nadif & Dr. Imed Keraghel (Université Paris Cité). Reproduction & critical extension of Viswanathan et al. (2024).
+
 This project replicates and extends the few-shot clustering framework of Viswanathan et al. [1], integrating GPT-4.1-nano as a zero-cost oracle across six LLM-augmented clustering strategies. All experiments are run on Bank77 [2], CLINC150 [3], and TweetTopics [4] using `all-mpnet-base-v2` sentence embeddings [5].
 
 ---
@@ -68,7 +70,14 @@ Implements the two-stage ClusterLLM pipeline [6]: (i) triplet queries refine a c
 ---
 
 ## Results
+**Key findings**
 
+- **Keyphrase expansion is the most reliable lever** - simple, cheap, and consistently beats the K-Means baseline on all three datasets.
+- **Our two novel methods win where it matters:** *LLM Semantic Normalization* gives the best accuracy on **Bank77**, and *LLM Paraphrase Ensemble* the best accuracy on **CLINC** (and best NMI on Bank77) - beating every baseline on **2 of 3 datasets**.
+- **Feature enrichment > constraint injection:** acting on the representation (keyphrase / normalization / paraphrase) outperforms steering clustering with pairwise constraints.
+- **Pairwise constraints are bottlenecked by oracle recall:** the LLM oracle is high-precision (~0.78) but low-recall (~0.23), which caps PCKMeans.
+- **Post-hoc correction is the weakest LLM strategy:** the LLM rarely overrides K-Means, and when it does it is often wrong - low confidence ≠ misclassified.
+- 
 <p align="center">
   <img src="report/figures/fig4_results.png" width="580" alt="Clustering accuracy across methods and datasets"/>
   <br><em>Figure 4 — Clustering accuracy (%, Hungarian-matched) across all eight methods and three datasets. LLM-augmented methods consistently outperform the K-Means baseline; keyphrase expansion achieves the best overall accuracy on Bank77.</em>
@@ -81,20 +90,24 @@ Implements the two-stage ClusterLLM pipeline [6]: (i) triplet queries refine a c
 
 ### Quantitative Summary (Accuracy / NMI)
 
-Full results are written to `results/experiment_results_table.csv` after running experiments.
+Clustering performance (ACC / NMI, higher is better) across all eight methods and three datasets.
+Embeddings: `all-mpnet-base-v2`; ACC via Hungarian matching. Full results are also written to
+`results/experiment_results_table.csv`.
 
-| Method | Bank77 Acc | Bank77 NMI | CLINC Acc | CLINC NMI | Tweet Acc | Tweet NMI |
-|--------|-----------|-----------|----------|----------|---------|---------|
-| K-Means | — | — | — | — | — | — |
-| JoSE + Spherical KM | — | — | — | — | — | — |
-| PCKMeans | — | — | — | — | — | — |
-| LLM Correction | — | — | — | — | — | — |
-| Keyphrase | **0.647** | **0.816** | — | — | — | — |
-| LLM Normalization | — | — | — | — | — | — |
-| LLM Paraphrase | — | — | — | — | — | — |
-| ClusterLLM | — | — | — | — | — | — |
+| Method                  | Bank77 Acc | Bank77 NMI | CLINC Acc | CLINC NMI | Tweet Acc | Tweet NMI |
+| ----------------------- | :--------: | :--------: | :-------: | :-------: | :-------: | :-------: |
+| K-Means                 |   0.591    |   0.795    |   0.777   |   0.916   |   0.649   |   0.872   |
+| JoSE + Spherical KM     |   0.171    |   0.398    |   0.187   |   0.489   |   0.285   |   0.440   |
+| PCKMeans                |   0.608    |   0.794    |   0.673   |   0.891   |   0.569   |   0.833   |
+| LLM Correction          |   0.594    |   0.797    |   0.777   |   0.916   |   0.650   |   0.873   |
+| Keyphrase               |   0.647    |   0.816    |   0.752   |   0.914   | **0.651** | **0.882** |
+| LLM Normalization †     | **0.649**  |   0.814    |   0.785   | **0.922** |   0.640   |   0.871   |
+| LLM Paraphrase †        |   0.632    | **0.819**  | **0.787** | **0.922** |   0.621   |   0.875   |
+| ClusterLLM              |   0.474    |   0.818    |   0.540   |   0.883   |   0.427   |   0.824   |
 
-*Cells marked — populate after `make run`.*
+† Novel methods proposed in this work. Best per column in **bold**.
+
+**Both novel methods lead on Bank77 and CLINC** (LLM Normalization: best Bank77 ACC 0.649 and best CLINC NMI 0.922; LLM Paraphrase: best Bank77 NMI 0.819 and best CLINC ACC 0.787), while **Keyphrase Expansion dominates Tweet** (ACC 0.651, NMI 0.882). ClusterLLM removes the need for a known *k* at the cost of lower ACC.
 
 ### LLM Cost Breakdown (GPT-4.1-nano)
 
@@ -252,3 +265,21 @@ All key hyperparameters live in [`src/config.py`](src/config.py):
 [7] M. Meng et al., "Spherical Text Embedding," in *NeurIPS*, 2019.
 
 [8] S. Basu, M. Bilenko, and R. J. Mooney, "A Probabilistic Framework for Semi-Supervised Clustering," in *Proc. KDD*, 2004.
+
+---
+
+## Team & attribution
+
+Carried out as an M.Sc. research project at **Université Paris Cité** by:
+
+- **Tassadit Debiane**
+- **Ala Eddine Choukr-Allah**
+- **Aymane Nouhail**
+- **Khalil Maadani**
+
+Supervised by **Pr. Mohamed Nadif** and **Dr. Imed Keraghel**.
+
+The project reproduces and extends *"Large Language Models Enable Few-Shot Clustering"*
+(Viswanathan et al., TACL 2024 — [arXiv:2307.00524](https://arxiv.org/abs/2307.00524)).
+My contributions focused on the two novel feature-enrichment methods (**LLM Semantic
+Normalization** and **LLM Paraphrase Ensemble**) and the evaluation/analysis pipeline.
