@@ -109,6 +109,31 @@ Embeddings: `all-mpnet-base-v2`; ACC via Hungarian matching. Full results are al
 
 **Both novel methods lead on Bank77 and CLINC** (LLM Normalization: best Bank77 ACC 0.649 and best CLINC NMI 0.922; LLM Paraphrase: best Bank77 NMI 0.819 and best CLINC ACC 0.787), while **Keyphrase Expansion dominates Tweet** (ACC 0.651, NMI 0.882). ClusterLLM removes the need for a known *k* at the cost of lower ACC.
 
+### Embedding Backbone (no LLM calls)
+
+Every method above sits on top of the sentence embeddings, so we also compared the
+`all-mpnet-base-v2` backbone against instruction-tuned Qwen3 embedders, using plain K-Means
+only (no LLM calls). With `--instruct`, each text gets a per-dataset task instruction
+(`EMBEDDING_INSTRUCTIONS` in `src/config.py`).
+
+| Embedding model           | Instruct | Bank77 Acc      | Bank77 NMI      | CLINC Acc       | CLINC NMI       |
+| ------------------------- | :------: | :-------------: | :-------------: | :-------------: | :-------------: |
+| all-mpnet-base-v2         |    –     | 0.631 ± 0.028   | 0.810 ± 0.009   | 0.766 ± 0.014   | 0.909 ± 0.006   |
+| Qwen3-Embedding-0.6B      |    no    | 0.646 ± 0.008   | 0.814 ± 0.005   | 0.729 ± 0.014   | 0.903 ± 0.001   |
+| Qwen3-Embedding-0.6B      |   yes    | 0.684 ± 0.007   | 0.824 ± 0.005   | 0.812 ± 0.008   | 0.926 ± 0.002   |
+| Qwen3-Embedding-8B        |    no    | **0.721 ± 0.011** | **0.864 ± 0.004** | 0.805 ± 0.017 | 0.937 ± 0.004   |
+| Qwen3-Embedding-8B        |   yes    | 0.711 ± 0.024   | 0.862 ± 0.005   | **0.831 ± 0.014** | **0.941 ± 0.002** |
+
+Mean ± std over 5 K-Means seeds (`random_state` 0–4), measured on one NVIDIA L40. Embedding
+takes under 3 min for the 8B model in bf16. Plain K-Means on a stronger backbone beats every
+LLM-augmented method on mpnet in the table above. Note that the mpnet baseline varies by
+±0.03 ACC across seeds on Bank77; the table above reports seed 0 (0.591).
+
+```bash
+python -m main.run_experiments --datasets bank77,clinc --methods kmeans \
+    --embedding-model Qwen/Qwen3-Embedding-8B --instruct
+```
+
 ### LLM Cost Breakdown (GPT-4.1-nano)
 
 <p align="center">
@@ -236,7 +261,8 @@ All key hyperparameters live in [`src/config.py`](src/config.py):
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `EMBEDDING_BACKEND` | `sentence_transformers` | `sentence_transformers` or `openai` |
-| `SENTENCE_TRANSFORMER_MODEL` | `all-mpnet-base-v2` | HuggingFace model name |
+| `SENTENCE_TRANSFORMER_MODEL` | `all-mpnet-base-v2` | HuggingFace model name (override with `EMBEDDING_MODEL` env var or `--embedding-model`) |
+| `EMBEDDING_INSTRUCTIONS` | per dataset | Task instruction prefixed to texts when `--instruct` is passed |
 | `GENERATION_MODEL_NAME` | `gpt-4.1-nano` | OpenAI generation model |
 | `PC_NUM_PAIRS_TO_QUERY` | `2000` | LLM calls for PCKMeans |
 | `PC_CONSTRAINT_SELECTION_STRATEGY` | `random` | `random` or `uncertainty` |
