@@ -42,15 +42,15 @@ def _get_embeddings(
     """Get embeddings from cache or generate and cache them.
 
     Cache location: {cache_path}/{dataset_name}/embeddings.pkl
-    The model class name is stored inside the pickle so stale caches
-    (e.g. switching from OpenAI to sentence-transformers) are detected
+    The model name (and embedding instruction, if any) is stored inside the
+    pickle so stale caches (e.g. switching embedding model) are detected
     and regenerated automatically.
     """
     if not docs or not embedding_model:
         return np.array([])
 
     cache_file = None
-    model_id = type(embedding_model).__name__
+    model_id = getattr(embedding_model, "cache_key", type(embedding_model).__name__)
     if cache_path:
         dataset_dir = os.path.join(cache_path, dataset_name)
         cache_file = os.path.join(dataset_dir, "embeddings.pkl")
@@ -146,7 +146,7 @@ def _load_tweet_yin_wang(path: str) -> Tuple[List[str], List[int], List[str]]:
 def _load_clinc() -> Tuple[List[str], List[int], List[str]]:
     """Load CLINC dataset."""
     try:
-        dataset = load_dataset_hf("clinc_oos", "small")["test"]
+        dataset = load_dataset_hf("clinc/clinc_oos", "small")["test"]
         texts = dataset["text"]
         intents = dataset["intent"]
 
@@ -178,7 +178,9 @@ def _load_hf_dataset(
 ) -> Tuple[List[str], List[int], List[str]]:
     """Load HuggingFace dataset with optional filtering."""
     try:
-        data = load_dataset_hf(*dataset.split("/"))["test"]
+        # "namespace/name" or "namespace/name/config"
+        parts = dataset.split("/")
+        data = load_dataset_hf("/".join(parts[:2]), *parts[2:])["test"]
         texts, labels = data[text_field], data[label_field]
 
         if filter_func:
@@ -227,7 +229,7 @@ def load_dataset(
             )
     elif dataset_name == "bank77":
         docs, labels, raw_data = _load_hf_dataset(
-            dataset="banking77", text_field="text", label_field="label"
+            dataset="legacy-datasets/banking77", text_field="text", label_field="label"
         )
     else:
         print(f"Unknown dataset: {dataset_name}. Supported: bank77, clinc, tweet")

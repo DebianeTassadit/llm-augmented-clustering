@@ -99,6 +99,10 @@ class MockLLMService:
     def get_embedding(self, text: str):
         return self.embedding_model.embed_query(text)
 
+    def get_embeddings(self, texts):
+        vectors = np.asarray(self.embedding_model.embed_documents(texts))
+        return vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
+
     def get_embedding_dimension(self) -> int:
         if self._embedding_dim is None:
             self._embedding_dim = len(self.get_embedding("test"))

@@ -24,6 +24,8 @@ from src.config import (
     DATA_CACHE_PATH,
     RESULTS_ROOT,
     EMBEDDING_BACKEND,
+    SENTENCE_TRANSFORMER_MODEL,
+    EMBEDDING_INSTRUCTIONS,
     DATASET_PROMPTS,
     # Method hyperparameters
     PC_NUM_PAIRS_TO_QUERY,
@@ -74,6 +76,7 @@ def run_one_dataset(
     dataset_name: str,
     methods: list,
     llm_service: LLMService,
+    instruct: bool = False,
 ) -> list:
     """Run selected methods on one dataset and return list of result dicts."""
     results = []
@@ -82,6 +85,9 @@ def run_one_dataset(
     os.makedirs(output_dir, exist_ok=True)
 
     # Load sentence-transformer embeddings (cached after first run)
+    llm_service.set_embedding_instruction(
+        EMBEDDING_INSTRUCTIONS.get(dataset_name) if instruct else None
+    )
     print(f"\n{'='*60}")
     print(f"  Dataset: {dataset_name.upper()}")
     print(f"{'='*60}")
@@ -99,7 +105,7 @@ def run_one_dataset(
     # Method 1: K-Means baseline                                          #
     # ------------------------------------------------------------------ #
     if "kmeans" in methods:
-        print("\n[1/8] K-Means (all-mpnet-base-v2)")
+        print("\n[1/8] K-Means")
         assignments = run_naive_kmeans(features, n_clusters)
         metrics = calculate_clustering_metrics(labels, assignments, n_clusters)
         results.append(
@@ -371,6 +377,17 @@ def main():
         default="all",
         help=f"Comma-separated methods or 'all'. Choices: {','.join(ALL_METHODS)}",
     )
+    parser.add_argument(
+        "--embedding-model",
+        default=SENTENCE_TRANSFORMER_MODEL,
+        help="sentence-transformers model id (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--instruct",
+        action="store_true",
+        help="Prefix texts with a per-dataset task instruction "
+        "(for instruction-tuned embedders such as Qwen3-Embedding)",
+    )
     args = parser.parse_args()
 
     datasets = [d.strip() for d in args.datasets.split(",") if d.strip()]
@@ -382,15 +399,20 @@ def main():
 
     print(f"\nDatasets : {datasets}")
     print(f"Methods  : {methods}")
-    print(f"Embedding: {EMBEDDING_BACKEND}\n")
+    print(f"Embedding: {EMBEDDING_BACKEND} ({args.embedding_model})")
+    print(f"Instruct : {args.instruct}\n")
 
     llm_service = LLMService(
-        api_key=OPENAI_API_KEY or "", embedding_backend=EMBEDDING_BACKEND
+        api_key=OPENAI_API_KEY or "",
+        embedding_backend=EMBEDDING_BACKEND,
+        embedding_model_name=args.embedding_model,
     )
 
     all_results = []
     for dataset in datasets:
-        all_results.extend(run_one_dataset(dataset, methods, llm_service))
+        all_results.extend(
+            run_one_dataset(dataset, methods, llm_service, instruct=args.instruct)
+        )
 
     if not all_results:
         print("No results collected.")
