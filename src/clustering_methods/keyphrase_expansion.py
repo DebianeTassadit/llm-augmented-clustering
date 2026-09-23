@@ -14,12 +14,10 @@ from src.llm_service import LLMService, KeyphraseList
 def process_document(
     doc_index: int,
     document: str,
-    features: np.ndarray,
     llm_service: LLMService,
     prompt_template: ChatPromptTemplate,
-    embedding_dim: int,
-) -> Tuple[int, str, List[str], Optional[np.ndarray], Optional[np.ndarray]]:
-    """Query the LLM for keyphrases and embed the expanded text for one document."""
+) -> Tuple[int, str, List[str]]:
+    """Query the LLM for keyphrases for one document."""
     try:
         prompt = prompt_template.format(document_text=document)
         llm_response = llm_service.get_chat_completion(
@@ -30,70 +28,9 @@ def process_document(
             if llm_response and hasattr(llm_response, "keyphrases")
             else []
         )
-
-        joined_text = ", ".join([document] + keyphrases)
-        expansion_embedding = (
-            np.array(llm_service.get_embedding(joined_text)) if keyphrases else None
-        )
-
-        orig_feature = features[doc_index].reshape(1, -1)
-        orig_norm = (
-            normalize(orig_feature, axis=1, norm="l2").flatten()
-            if np.linalg.norm(orig_feature) > 0
-            else np.zeros_like(orig_feature).flatten()
-        )
-
-        exp_norm = None
-        if (
-            expansion_embedding is not None
-            and len(expansion_embedding) == embedding_dim
-        ):
-            exp_2d = expansion_embedding.reshape(1, -1)
-            exp_norm = (
-                normalize(exp_2d, axis=1, norm="l2").flatten()
-                if np.linalg.norm(exp_2d) > 0
-                else np.zeros_like(exp_2d).flatten()
-            )
-
-        return (doc_index, document, keyphrases, orig_norm, exp_norm)
+        return (doc_index, document, keyphrases)
     except Exception:
-        return (doc_index, document, [], None, None)
-
-
-def _embed_from_keyphrases(
-    doc_index: int,
-    document: str,
-    keyphrases: List[str],
-    features: np.ndarray,
-    llm_service: LLMService,
-    embedding_dim: int,
-) -> Tuple[int, Optional[np.ndarray], Optional[np.ndarray]]:
-    """Compute normalized embeddings from already-known keyphrases (cache-hit path)."""
-    try:
-        orig_feature = features[doc_index].reshape(1, -1)
-        orig_norm = (
-            normalize(orig_feature, axis=1, norm="l2").flatten()
-            if np.linalg.norm(orig_feature) > 0
-            else np.zeros_like(orig_feature).flatten()
-        )
-
-        if not keyphrases:
-            return (doc_index, orig_norm, None)
-
-        joined_text = ", ".join([document] + keyphrases)
-        expansion_embedding = np.array(llm_service.get_embedding(joined_text))
-
-        exp_norm = None
-        if len(expansion_embedding) == embedding_dim:
-            exp_2d = expansion_embedding.reshape(1, -1)
-            exp_norm = (
-                normalize(exp_2d, axis=1, norm="l2").flatten()
-                if np.linalg.norm(exp_2d) > 0
-                else np.zeros_like(exp_2d).flatten()
-            )
-        return (doc_index, orig_norm, exp_norm)
-    except Exception:
-        return (doc_index, None, None)
+        return (doc_index, document, [])
 
 
 def cluster_via_keyphrase_expansion(
@@ -113,7 +50,6 @@ def cluster_via_keyphrase_expansion(
     'concatenated', 'average', 'weighted_0.1' … 'weighted_1.0'.
     """
     n_samples = len(documents)
-    embedding_dim = features.shape[1]
 
     output_dir = os.path.dirname(keyphrase_output_csv_path)
     if output_dir:
@@ -157,10 +93,8 @@ def cluster_via_keyphrase_expansion(
                     process_document,
                     i,
                     documents[i],
-                    features,
                     llm_service,
                     prompt_template,
-                    embedding_dim,
                 ): i
                 for i in range(n_samples)
             }
@@ -173,7 +107,7 @@ def cluster_via_keyphrase_expansion(
 
         for result in raw_results:
             if result:
-                doc_index, _, keyphrases, _, _ = result
+                doc_index, _, keyphrases = result
                 keyphrases_map[doc_index] = keyphrases
 
         with open(cache_file, "wb") as f:
@@ -191,45 +125,17 @@ def cluster_via_keyphrase_expansion(
             ]
         ).to_csv(keyphrase_output_csv_path, index=False)
 
-    print(f"  Embedding keyphrase expansions ({n_samples} docs)...")
-    max_workers = min(50, n_samples)
-    embed_results: List[Tuple] = [None] * n_samples
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(
-                _embed_from_keyphrases,
-                i,
-                documents[i],
-                keyphrases_map.get(i, []),
-                features,
-                llm_service,
-                embedding_dim,
-            ): i
-            for i in range(n_samples)
-        }
-        for future in tqdm(
-            concurrent.futures.as_completed(futures), total=n_samples, desc="Embedding"
-        ):
-            embed_results[futures[future]] = future.result()
-
-    original_features: List[np.ndarray] = []
-    expanded_features: List[np.ndarray] = []
-    successful_indices: List[int] = []
-
-    for result in embed_results:
-        if result:
-            doc_index, orig, exp = result
-            if orig is not None and exp is not None:
-                original_features.append(orig)
-                expanded_features.append(exp)
-                successful_indices.append(doc_index)
-
-    if not original_features:
+    # Docs whose keyphrase query failed are left unassigned (-1).
+    successful_indices = [i for i in range(n_samples) if keyphrases_map.get(i)]
+    if not successful_indices:
         return {"concatenated": None, "average": None}
 
-    orig_arr = np.array(original_features)
-    exp_arr = np.array(expanded_features)
+    print(f"  Embedding keyphrase expansions ({len(successful_indices)} docs)...")
+    expanded_texts = [
+        ", ".join([documents[i]] + keyphrases_map[i]) for i in successful_indices
+    ]
+    exp_arr = llm_service.get_embeddings(expanded_texts)
+    orig_arr = normalize(features[successful_indices], axis=1, norm="l2")
     full_assignments = np.full(n_samples, -1, dtype=int)
 
     def run_clustering(feat: np.ndarray) -> Optional[np.ndarray]:

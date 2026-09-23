@@ -2,6 +2,7 @@ import time
 import os
 import threading
 import csv
+import numpy as np
 from typing import List, Any, Type
 
 # Suppress HuggingFace tokenizers parallelism warning when forking
@@ -135,6 +136,11 @@ class SentenceTransformerEmbeddings(Embeddings):
     - Batched encoding (batch_size=128) to maximise GPU/CPU throughput.
     - Progress bar for corpora > 100 documents.
     - Automatic device selection (MPS on Apple Silicon, CUDA if available, else CPU).
+    - Weights loaded in their checkpoint dtype (bf16 for most LLM-based embedders).
+
+    If ``instruction`` is set, every text is prefixed with
+    ``"Instruct: {instruction}\nQuery: "`` — the format expected by
+    instruction-tuned embedders (Qwen3-Embedding, e5-mistral, gte-Qwen2).
     """
 
     def __init__(self, model_name: str = "all-mpnet-base-v2", batch_size: int = 128):
@@ -147,28 +153,44 @@ class SentenceTransformerEmbeddings(Embeddings):
             device = "cuda"
         else:
             device = "cpu"
-        self._model = SentenceTransformer(model_name, device=device)
+        self._model = SentenceTransformer(
+            model_name, device=device, model_kwargs={"dtype": "auto"}
+        )
         self._model_name = model_name
         self._batch_size = batch_size
+        self.instruction: str | None = None
         print(f"SentenceTransformer '{model_name}' loaded on {device}.")
+
+    @property
+    def cache_key(self) -> str:
+        """Identifies the embedding space (model + instruction) for caching."""
+        return f"{self._model_name}|{self.instruction or ''}"
+
+    def _prompt(self) -> str | None:
+        return f"Instruct: {self.instruction}\nQuery: " if self.instruction else None
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         show_progress = len(texts) > 100
         vectors = self._model.encode(
             texts,
+            prompt=self._prompt(),
             batch_size=self._batch_size,
             show_progress_bar=show_progress,
             convert_to_numpy=True,
         )
-        return vectors.tolist()
+        return vectors.astype(np.float32).tolist()
 
     def embed_query(self, text: str) -> List[float]:
-        vector = self._model.encode([text], convert_to_numpy=True)
-        return vector[0].tolist()
+        return self.embed_documents([text])[0]
 
 
 class LLMService:
-    def __init__(self, api_key: str, embedding_backend: str = EMBEDDING_BACKEND):
+    def __init__(
+        self,
+        api_key: str,
+        embedding_backend: str = EMBEDDING_BACKEND,
+        embedding_model_name: str = SENTENCE_TRANSFORMER_MODEL,
+    ):
         if api_key:
             os.environ["OPENAI_API_KEY"] = api_key
         self.embedding_model = None
@@ -183,7 +205,7 @@ class LLMService:
         if embedding_backend == "sentence_transformers":
             try:
                 self.embedding_model = SentenceTransformerEmbeddings(
-                    SENTENCE_TRANSFORMER_MODEL
+                    embedding_model_name
                 )
                 test_embedding = self.embedding_model.embed_query("test")
                 self._embedding_dim = len(test_embedding)
@@ -248,6 +270,19 @@ class LLMService:
             print(f"Warning: Embedding dimension unknown, assuming {default_dim}.")
             return default_dim
         return self._embedding_dim
+
+    def set_embedding_instruction(self, instruction: str | None) -> None:
+        """Set the task instruction used by instruction-tuned embedders."""
+        if isinstance(self.embedding_model, SentenceTransformerEmbeddings):
+            self.embedding_model.instruction = instruction
+
+    def get_embeddings(self, texts: List[str]) -> np.ndarray:
+        """Embed a list of texts in one batched call; rows are L2-normalized."""
+        vectors = np.asarray(
+            self.get_embedding_model().embed_documents(texts), dtype=np.float32
+        )
+        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        return vectors / np.where(norms > 0, norms, 1.0)
 
     def get_embedding(self, text: str) -> List[float]:
         if self.embedding_model is None:

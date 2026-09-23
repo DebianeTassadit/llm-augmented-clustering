@@ -14,7 +14,16 @@ if not OPENAI_API_KEY:
 # "sentence_transformers": use all-mpnet-base-v2 locally (recommended for replication)
 # "openai": use text-embedding-ada-002 via OpenAI API
 EMBEDDING_BACKEND = "sentence_transformers"
-SENTENCE_TRANSFORMER_MODEL = "all-mpnet-base-v2"
+# Any sentence-transformers model id, e.g. "Qwen/Qwen3-Embedding-8B" (GPU recommended).
+SENTENCE_TRANSFORMER_MODEL = os.getenv("EMBEDDING_MODEL", "all-mpnet-base-v2")
+
+# Task instructions for instruction-tuned embedders (enabled with --instruct).
+# Leave off for models not trained with instructions (e.g. all-mpnet-base-v2).
+EMBEDDING_INSTRUCTIONS = {
+    "bank77": "Given a customer banking query, identify the banking intent of the query",
+    "clinc": "Given a user utterance to a virtual assistant, identify the intent of the utterance",
+    "tweet": "Given a tweet, identify the topic or theme of the tweet",
+}
 
 EMBEDDING_MODEL_NAME = (
     "text-embedding-ada-002"  # used only when EMBEDDING_BACKEND="openai"
